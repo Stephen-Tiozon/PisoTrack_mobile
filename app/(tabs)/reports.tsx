@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable, Dimensions } from 'react-native';
 import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { db } from '../../db';
@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import * as Haptics from 'expo-haptics';
 import { useThemeStore } from '../../store/theme';
 import { getColors } from '../../theme/colors';
+import { PieChart, LineChart } from 'react-native-gifted-charts';
 
 const CATEGORY_ICONS: Record<string, string> = {
   Food: '🍱',
@@ -24,6 +25,7 @@ export default function ReportsScreen() {
   const colors = getColors(theme);
   const styles = createStyles(colors);
   const [categoryData, setCategoryData] = useState<{category: string, amount: number}[]>([]);
+  const [sevenDayData, setSevenDayData] = useState<{value: number, label: string}[]>([]);
   const [totalExpense, setTotalExpense] = useState(0);
   const [savedAmount, setSavedAmount] = useState(0);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -45,32 +47,53 @@ export default function ReportsScreen() {
           let lastMonthTotal = 0;
           const grouped: Record<string, number> = {};
           
+          // For 7 day data
+          const today = new Date();
+          const sevenDaysAgo = new Date(today);
+          sevenDaysAgo.setDate(today.getDate() - 6);
+          sevenDaysAgo.setHours(0, 0, 0, 0);
+
+          const dailyTotals: Record<string, number> = {};
+          const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          
+          // Initialize last 7 days
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(today.getDate() - i);
+            const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            dailyTotals[key] = 0;
+          }
+
           allExpenses.forEach((e) => {
+            let txDate: Date | null = null;
             let txMonth = -1;
             let txYear = -1;
             
             // Try robust parsing
             if (e.date.includes('-') || e.date.includes('T')) {
-              // ISO or YYYY-MM-DD
-              const d = new Date(e.date);
-              if (!isNaN(d.getTime())) {
-                txMonth = d.getMonth();
-                txYear = d.getFullYear();
+              txDate = new Date(e.date);
+              if (!isNaN(txDate.getTime())) {
+                txMonth = txDate.getMonth();
+                txYear = txDate.getFullYear();
               }
             } else {
-              // 'Sep 14, 2026' format
               const parts = e.date.split(' ');
               if (parts.length >= 3) {
-                const monthStr = parts[0]; // 'Sep'
-                const yearStr = parts[2]; // '2026'
+                const monthStr = parts[0]; 
+                const yearStr = parts[2]; 
                 txMonth = monthNames.indexOf(monthStr);
                 txYear = parseInt(yearStr, 10);
+                
+                // Construct a date to check 7 days ago
+                txDate = new Date(`${monthStr} ${parts[1]}, ${yearStr}`);
+                if (isNaN(txDate.getTime())) {
+                  txDate = new Date(`${monthStr} ${parts[1]} ${yearStr}`);
+                }
               } else {
-                // Fallback parsing just in case
-                const d = new Date(e.date);
-                if (!isNaN(d.getTime())) {
-                  txMonth = d.getMonth();
-                  txYear = d.getFullYear();
+                txDate = new Date(e.date);
+                if (!isNaN(txDate.getTime())) {
+                  txMonth = txDate.getMonth();
+                  txYear = txDate.getFullYear();
                 }
               }
             }
@@ -84,6 +107,14 @@ export default function ReportsScreen() {
             } else if (isLast) {
               lastMonthTotal += e.amount;
             }
+            
+            // 7 day logic
+            if (txDate && txDate >= sevenDaysAgo && txDate <= today) {
+               const key = `${txDate.getFullYear()}-${String(txDate.getMonth()+1).padStart(2, '0')}-${String(txDate.getDate()).padStart(2, '0')}`;
+               if (dailyTotals[key] !== undefined) {
+                 dailyTotals[key] += e.amount;
+               }
+            }
           });
           
           setTotalExpense(currentMonthTotal);
@@ -94,6 +125,15 @@ export default function ReportsScreen() {
             .sort((a, b) => b.amount - a.amount);
             
           setCategoryData(sortedData);
+          
+          const newSevenDayData = Object.keys(dailyTotals).sort().map(key => {
+            const d = new Date(key);
+            return {
+              value: dailyTotals[key],
+              label: daysOfWeek[d.getDay()]
+            };
+          });
+          setSevenDayData(newSevenDayData);
         } catch (err) {
           console.error("Failed to fetch reports:", err);
         }
@@ -114,10 +154,16 @@ export default function ReportsScreen() {
 
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthName = monthNames[selectedDate.getMonth()];
-  const displayYear = selectedDate.getFullYear() !== new Date().getFullYear() ? ` '${selectedDate.getFullYear().toString().slice(2)}` : '';
+  const displayYear = selectedDate.getFullYear() !== new Date().getFullYear() ? ` ${selectedDate.getFullYear()}` : ` ${selectedDate.getFullYear()}`;
 
-  const maxCategoryAmount = categoryData.length > 0 ? categoryData[0].amount : 1;
   const barColors = [colors.primary, colors.success, colors.warning, colors.danger, '#8B5CF6'];
+
+  const pieData = categoryData.slice(0, 5).map((item, index) => {
+    return {
+      value: item.amount,
+      color: barColors[index % barColors.length],
+    };
+  });
 
   return (
     <ScrollView style={styles.container}>
@@ -134,76 +180,104 @@ export default function ReportsScreen() {
         </View>
       </View>
       
-      <View style={styles.chartContainer}>
-        <View style={styles.chartBox}>
-          {categoryData.length === 0 ? (
-            <Text style={{ color: colors.textTertiary }}>No data to chart</Text>
-          ) : (
-            <View style={styles.chartInner}>
-              {categoryData.slice(0, 5).map((item, index) => {
-                const heightPercentage = Math.max(10, (item.amount / maxCategoryAmount) * 100);
-                return (
-                  <View key={item.category} style={styles.barColumn}>
-                    <Text style={styles.barValue}>{Math.round((item.amount / totalExpense) * 100)}%</Text>
-                    <View style={styles.barTrack}>
-                      <View style={[styles.barFill, { height: `${heightPercentage}%`, backgroundColor: barColors[index % barColors.length] }]} />
-                    </View>
-                    <Text style={styles.barLabel}>{CATEGORY_ICONS[item.category] || '📦'}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </View>
-      </View>
-      
       <View style={styles.cardsContainer}>
         <View style={styles.summaryCard}>
           <Text style={styles.cardTitle}>Total Spent</Text>
-          <Text style={styles.cardValue}>{currencySymbol}{totalExpense.toFixed(0)}</Text>
-          <View style={styles.progressTrack}>
-            <View style={styles.progressFillRed} />
-          </View>
+          <Text style={styles.cardValueRed}>{currencySymbol}{totalExpense.toLocaleString()}</Text>
+          <Text style={styles.cardSubText}>{monthName}</Text>
         </View>
         <View style={styles.summaryCard}>
           <Text style={styles.cardTitle}>Saved vs Last</Text>
-          <Text style={[styles.cardValue, { color: savedAmount >= 0 ? colors.success : colors.danger }]}>
-            {savedAmount >= 0 ? '+' : '-'}{currencySymbol}{Math.abs(savedAmount).toFixed(0)}
+          <Text style={[styles.cardValueGreen, { color: savedAmount >= 0 ? colors.success : colors.danger }]}>
+            {savedAmount >= 0 ? '+' : '-'}{currencySymbol}{Math.abs(savedAmount).toLocaleString()}
           </Text>
-          <View style={styles.progressTrack}>
-            {savedAmount >= 0 ? (
-              <View style={styles.progressFillGreen} />
+          <Text style={[styles.cardSubText, { color: savedAmount >= 0 ? colors.success : colors.danger }]}>
+            {savedAmount >= 0 ? '+ better' : '- worse'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionCardTitle}>Spending Breakdown</Text>
+        <View style={styles.breakdownContent}>
+          <View style={styles.chartWrapper}>
+            {pieData.length > 0 ? (
+              <PieChart
+                donut
+                innerRadius={50}
+                radius={75}
+                data={pieData}
+                centerLabelComponent={() => {
+                  return <View />
+                }}
+              />
             ) : (
-              <View style={styles.progressFillRed} />
+              <View style={[styles.chartWrapper, { height: 150, justifyContent: 'center' }]}>
+                <Text style={{ color: colors.textTertiary }}>No data</Text>
+              </View>
             )}
+          </View>
+          <View style={styles.legendContainer}>
+            {categoryData.slice(0, 5).map((item, index) => (
+              <View key={item.category} style={styles.legendRow}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: barColors[index % barColors.length] }]} />
+                  <Text style={styles.legendText}>{item.category}</Text>
+                </View>
+                <Text style={styles.legendAmount}>{currencySymbol}{item.amount.toLocaleString()}</Text>
+              </View>
+            ))}
           </View>
         </View>
       </View>
-      
-      <Text style={styles.sectionTitle}>By Category</Text>
-      <View style={styles.categoryList}>
-        {categoryData.length === 0 ? (
-          <Text style={{ color: colors.textTertiary, textAlign: 'center', marginTop: 20 }}>No data for this month.</Text>
-        ) : (
-          categoryData.map((item, index) => {
-            const percentage = totalExpense > 0 ? (item.amount / totalExpense) * 100 : 0;
-            
-            return (
-              <View key={item.category} style={styles.categoryItem}>
-                <View style={styles.categoryLeft}>
-                  <View style={styles.categoryIconWrapper}>
-                    <Text style={styles.categoryIcon}>{CATEGORY_ICONS[item.category] || '📦'}</Text>
+
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionCardTitle}>7-Day Spending</Text>
+        <View style={styles.lineChartContainer}>
+          <LineChart
+            data={sevenDayData}
+            color={colors.primary}
+            thickness={3}
+            dataPointsColor={colors.primary}
+            hideYAxisText
+            hideRules
+            xAxisLabelTextStyle={{ color: colors.textTertiary, fontSize: 11, textAlign: 'center' }}
+            xAxisColor={colors.border}
+            yAxisColor="transparent"
+            height={140}
+            width={Dimensions.get('window').width - 90}
+            initialSpacing={20}
+            endSpacing={20}
+            isAnimated
+            curved
+            spacing={(Dimensions.get('window').width - 100) / 6}
+          />
+        </View>
+      </View>
+
+      <View style={[styles.sectionCard, { marginBottom: 40 }]}>
+        <Text style={styles.sectionCardTitle}>Top Categories</Text>
+        <View style={styles.topCategoriesContainer}>
+          {categoryData.length === 0 ? (
+            <Text style={{ color: colors.textTertiary }}>No data for this month.</Text>
+          ) : (
+            categoryData.slice(0, 5).map((item, index) => {
+              const percentage = totalExpense > 0 ? (item.amount / totalExpense) * 100 : 0;
+              return (
+                <View key={item.category} style={styles.categoryProgressRow}>
+                  <View style={styles.categoryLabelWrapper}>
+                    <Text style={styles.categoryEmoji}>{CATEGORY_ICONS[item.category] || '📦'}</Text>
+                    <Text style={styles.categoryName} numberOfLines={1}>{item.category}</Text>
                   </View>
-                  <View style={styles.categoryDetails}>
-                    <Text style={styles.categoryName}>{item.category}</Text>
-                    <Text style={styles.categoryCount}>{percentage.toFixed(0)}% of total</Text>
+                  <View style={styles.progressBarTrack}>
+                    <View style={[styles.progressBarFill, { width: `${percentage}%`, backgroundColor: barColors[index % barColors.length] }]} />
                   </View>
+                  <Text style={styles.categoryAmountText}>{currencySymbol}{item.amount.toLocaleString()}</Text>
                 </View>
-                <Text style={styles.categoryAmount}>{currencySymbol}{item.amount.toFixed(0)}</Text>
-              </View>
-            );
-          })
-        )}
+              );
+            })
+          )}
+        </View>
       </View>
     </ScrollView>
   );
@@ -223,24 +297,23 @@ const createStyles = (colors: any) => StyleSheet.create({
     marginBottom: 24,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 26,
+    fontWeight: '800',
     color: colors.text,
   },
   monthSelectorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 10,
   },
   monthSelector: {
-    color: colors.textSecondary,
-    fontSize: 16,
+    color: colors.primary,
+    fontSize: 15,
     fontWeight: '600',
-    minWidth: 40,
     textAlign: 'center',
   },
   monthArrow: {
-    padding: 8,
+    padding: 6,
   },
   monthArrowText: {
     color: colors.primary,
@@ -251,13 +324,13 @@ const createStyles = (colors: any) => StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 20,
     gap: 16,
-    marginBottom: 32,
+    marginBottom: 20,
   },
   summaryCard: {
     flex: 1,
     backgroundColor: colors.card,
     borderRadius: 20,
-    padding: 16,
+    padding: 18,
     borderWidth: 1,
     borderColor: colors.border,
   },
@@ -265,130 +338,121 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: colors.textTertiary,
     fontSize: 13,
     fontWeight: '600',
+    marginBottom: 10,
+  },
+  cardValueRed: {
+    color: colors.danger,
+    fontSize: 24,
+    fontWeight: '800',
     marginBottom: 8,
   },
-  cardValue: {
-    color: colors.text,
-    fontSize: 22,
+  cardValueGreen: {
+    color: colors.success,
+    fontSize: 24,
     fontWeight: '800',
-    marginBottom: 16,
+    marginBottom: 8,
   },
-  progressTrack: {
-    height: 8,
-    backgroundColor: colors.border,
-    borderRadius: 4,
-    overflow: 'hidden',
+  cardSubText: {
+    color: colors.textTertiary,
+    fontSize: 12,
   },
-  progressFillRed: {
-    height: '100%',
-    backgroundColor: colors.danger,
-    borderRadius: 4,
-  },
-  progressFillGreen: {
-    height: '100%',
-    backgroundColor: colors.success,
-    borderRadius: 4,
-  },
-  chartContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 40,
-  },
-  chartBox: {
-    height: 220,
+  sectionCard: {
     backgroundColor: colors.card,
     borderRadius: 20,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    padding: 20,
     borderWidth: 1,
     borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
   },
-  chartInner: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    width: '100%',
-    height: '100%',
-  },
-  barColumn: {
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    height: '100%',
-    width: 40,
-  },
-  barValue: {
-    color: colors.textTertiary,
-    fontSize: 10,
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  barTrack: {
-    flex: 1,
-    width: 12,
-    backgroundColor: colors.border,
-    borderRadius: 999,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  barFill: {
-    width: '100%',
-    borderRadius: 999,
-  },
-  barLabel: {
-    marginTop: 12,
-    fontSize: 18,
-  },
-  sectionTitle: {
+  sectionCardTitle: {
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '600',
-    paddingHorizontal: 20,
+    fontSize: 16,
+    fontWeight: '700',
     marginBottom: 16,
   },
-  categoryList: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+  breakdownContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  categoryItem: {
+  chartWrapper: {
+    paddingLeft: 0,
+    alignItems: 'center',
+  },
+  legendContainer: {
+    flex: 1,
+    paddingLeft: 24,
+  },
+  legendRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
+    marginBottom: 10,
   },
-  categoryLeft: {
+  legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
-  categoryIconWrapper: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.iconBg,
-    justifyContent: 'center',
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
+  },
+  legendText: {
+    color: colors.text,
+    fontSize: 13,
+  },
+  legendAmount: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  lineChartContainer: {
+    marginTop: 10,
+    paddingRight: 10,
     alignItems: 'center',
   },
-  categoryIcon: {
-    fontSize: 20,
+  topCategoriesContainer: {
+    marginTop: 5,
   },
-  categoryDetails: {
-    justifyContent: 'center',
+  categoryProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  categoryLabelWrapper: {
+    width: 90,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryEmoji: {
+    fontSize: 16,
+    marginRight: 8,
   },
   categoryName: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
   },
-  categoryCount: {
-    color: colors.textTertiary,
-    fontSize: 12,
-    marginTop: 4,
+  progressBarTrack: {
+    flex: 1,
+    height: 12,
+    backgroundColor: colors.border,
+    borderRadius: 6,
+    marginHorizontal: 12,
+    overflow: 'hidden',
   },
-  categoryAmount: {
-    color: colors.text,
-    fontSize: 16,
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  categoryAmountText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    width: 50,
+    textAlign: 'right',
     fontWeight: '600',
   },
 });
