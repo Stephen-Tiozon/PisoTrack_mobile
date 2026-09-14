@@ -30,10 +30,35 @@ export default function Root({ children }: { children: ReactNode }) {
 
 const responsiveBackground = `
 body {
-  background-color: #fff;
+  background-color: #0F0F1A;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0;
+  min-height: 100vh;
 }
+#root {
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  margin: 0 auto;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 30px rgba(0,0,0,0.5);
+  background-color: #0F0F1A;
+}
+
+/* Optional: Add a subtle border on larger screens */
+@media (min-width: 481px) {
+  #root {
+    height: 95vh;
+    border-radius: 30px;
+    border: 8px solid #1A1A2E;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   body {
-    background-color: #000;
+    background-color: #05050A;
   }
 }`;

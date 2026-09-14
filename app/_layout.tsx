@@ -3,7 +3,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider, router } from 'expo-rout
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 // Initialize the local SQLite database
@@ -104,7 +104,7 @@ function RootLayoutNav() {
   // Only show lock screen if they are onboarded AND not authenticated
   if (isOnboarded === true && !isAuthenticated) {
     return (
-      <View style={styles.lockContainer}>
+      <View style={Platform.OS === 'web' ? [styles.lockContainer, styles.webWrapper] : styles.lockContainer}>
         <Text style={styles.lockIcon}>🔒</Text>
         <Text style={styles.lockText}>PisoTrack is locked</Text>
         <Pressable style={styles.unlockBtn} onPress={authenticate}>
@@ -115,17 +115,39 @@ function RootLayoutNav() {
   }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
-        <Stack.Screen name="add" options={{ presentation: 'modal', headerShown: false }} />
-      </Stack>
-    </ThemeProvider>
+    <View style={Platform.OS === 'web' ? styles.webWrapper : { flex: 1 }}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />
+          <Stack.Screen name="add" options={{ presentation: 'modal', headerShown: false }} />
+        </Stack>
+      </ThemeProvider>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  webWrapper: {
+    flex: 1,
+    maxWidth: 480,
+    width: '100%',
+    marginHorizontal: 'auto',
+    backgroundColor: '#0F0F1A',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    ...(Platform.OS === 'web' && typeof window !== 'undefined' && window.innerWidth > 480 ? {
+      marginTop: 20,
+      marginBottom: 20,
+      borderRadius: 30,
+      borderWidth: 8,
+      borderColor: '#1A1A2E',
+      height: '95vh' as any,
+    } : {})
+  },
   lockContainer: {
     flex: 1,
     backgroundColor: '#0F0F1A',
