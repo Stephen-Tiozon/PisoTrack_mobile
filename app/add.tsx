@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, Pressable, SafeAreaView, ScrollView } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { db, expoDb } from '../db';
@@ -8,21 +8,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useThemeStore } from '../store/theme';
 import { getColors } from '../theme/colors';
 
-const EXPENSE_CATEGORIES = [
-  { id: 'Jeepney', icon: '🚌' },
-  { id: 'Food', icon: '🍔' },
-  { id: 'Groceries', icon: '🛒' },
-  { id: 'Shopping', icon: '🛍️' },
-  { id: 'Bills', icon: '💡' },
-];
-
-const INCOME_CATEGORIES = [
-  { id: 'Salary', icon: '💼' },
-  { id: 'Freelance', icon: '💻' },
-  { id: 'Gift', icon: '🎁' },
-  { id: 'Investment', icon: '📈' },
-];
-
 export default function AddExpenseScreen() {
   const { theme, currencySymbol } = useThemeStore();
   const colors = getColors(theme);
@@ -30,10 +15,33 @@ export default function AddExpenseScreen() {
 
   const params = useLocalSearchParams();
   const isIncome = params.type === 'income';
-  const categories = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const editId = params.id as string | undefined;
 
+  const [categories, setCategories] = useState<any[]>([]);
   const [amount, setAmount] = useState('0');
-  const [category, setCategory] = useState(categories[0].id);
+  const [category, setCategory] = useState('');
+
+  useEffect(() => {
+    const fetchSetup = async () => {
+      try {
+        const cats = await expoDb.getAllAsync(`SELECT * FROM categories WHERE type = ?`, [isIncome ? 'income' : 'expense']);
+        setCategories(cats);
+        
+        if (editId) {
+          const row: any = await expoDb.getFirstAsync(`SELECT * FROM expenses WHERE id = ?`, [editId]);
+          if (row) {
+            setAmount(row.amount.toString());
+            setCategory(row.category);
+          }
+        } else if (cats.length > 0) {
+          setCategory((cats[0] as any).name);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchSetup();
+  }, [editId, isIncome]);
 
   const handleKey = (k: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -51,13 +59,20 @@ export default function AddExpenseScreen() {
     const val = parseFloat(amount);
     if (val > 0) {
       try {
-        const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-        await expoDb.runAsync(
-          'INSERT INTO expenses (amount, category, date, type, synced_status) VALUES (?, ?, ?, ?, ?)',
-          [val, category, dateStr, isIncome ? 'income' : 'expense', 0]
-        );
+        if (editId) {
+          await expoDb.runAsync(
+            'UPDATE expenses SET amount = ?, category = ? WHERE id = ?',
+            [val, category, editId]
+          );
+        } else {
+          const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          await expoDb.runAsync(
+            'INSERT INTO expenses (amount, category, date, type, synced_status) VALUES (?, ?, ?, ?, ?)',
+            [val, category, dateStr, isIncome ? 'income' : 'expense', 0]
+          );
+        }
       } catch (err) {
-        console.error("Failed to insert record:", err);
+        console.error("Failed to insert/update record:", err);
       }
     }
     router.back();
@@ -71,7 +86,7 @@ export default function AddExpenseScreen() {
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Text style={styles.closeText}>←</Text>
         </Pressable>
-        <Text style={styles.title}>{isIncome ? 'Add Income' : 'Add Expense'}</Text>
+        <Text style={styles.title}>{editId ? 'Edit' : 'Add'} {isIncome ? 'Income' : 'Expense'}</Text>
         <Pressable onPress={submitExpense} hitSlop={10}>
           <Text style={styles.doneText}>Done</Text>
         </Pressable>
@@ -88,7 +103,7 @@ export default function AddExpenseScreen() {
       <View style={styles.categorySelectorWrapper}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroll}>
           {categories.map((c) => {
-            const isSelected = category === c.id;
+            const isSelected = category === c.name;
             return (
               <Pressable 
                 key={c.id} 
@@ -99,7 +114,7 @@ export default function AddExpenseScreen() {
                 ]}
                 onPress={() => {
                   Haptics.selectionAsync();
-                  setCategory(c.id);
+                  setCategory(c.name);
                 }}
               >
                 <Text style={[
@@ -107,7 +122,7 @@ export default function AddExpenseScreen() {
                   isSelected && styles.categoryTextSelected,
                   isSelected && isIncome && { color: '#10B981' }
                 ]}>
-                  {c.icon} {c.id}
+                  {c.icon} {c.name}
                 </Text>
               </Pressable>
             );

@@ -14,3 +14,10 @@ export const userProfile = sqliteTable('user_profile', {
   name: text('name').notNull(),
   hasOnboarded: integer('has_onboarded').default(0),
 });
+
+export const categories = sqliteTable('categories', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  icon: text('icon').notNull(),
+  type: text('type').default('expense'), // 'expense' or 'income'
+});

@@ -24,4 +24,31 @@ expoDb.execSync(`
   );
 `);
 
+expoDb.execSync(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    type TEXT DEFAULT 'expense'
+  );
+`);
+
+// Populate default categories if empty
+const catCount = expoDb.getFirstSync<any>('SELECT COUNT(*) as count FROM categories');
+if (catCount && catCount.count === 0) {
+  expoDb.execSync(`
+    INSERT INTO categories (name, icon, type) VALUES
+    ('Jeepney', '🚌', 'expense'),
+    ('Food', '🍔', 'expense'),
+    ('Groceries', '🛒', 'expense'),
+    ('Shopping', '🛍️', 'expense'),
+    ('Bills', '💡', 'expense'),
+    ('Transport', '🚌', 'expense'),
+    ('Salary', '💼', 'income'),
+    ('Freelance', '💻', 'income'),
+    ('Gift', '🎁', 'income'),
+    ('Investment', '📈', 'income');
+  `);
+}
+
 export const db = drizzle(expoDb, { schema });

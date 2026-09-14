@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, ScrollView, Pressable } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { db } from '../../db';
+import { StyleSheet, Text, View, ScrollView, Pressable, Alert } from 'react-native';
+import { useFocusEffect, router } from 'expo-router';
+import { db, expoDb } from '../../db';
 import { expenses } from '../../db/schema';
 import { desc } from 'drizzle-orm';
 import * as Haptics from 'expo-haptics';
@@ -15,9 +15,15 @@ export default function TransactionsScreen() {
   const styles = createStyles(colors);
   const [txList, setTxList] = useState<any[]>([]);
   const [filter, setFilter] = useState('All');
+  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
 
   const fetchTransactions = async () => {
     try {
+      const cats: any = await expoDb.getAllAsync('SELECT * FROM categories');
+      const map: Record<string, string> = {};
+      cats.forEach((c: any) => { map[c.name] = c.icon; });
+      setCategoryMap(map);
+
       const result = await db.select().from(expenses).orderBy(desc(expenses.id));
       setTxList(result);
     } catch (e) {
@@ -38,9 +44,47 @@ export default function TransactionsScreen() {
     return dateStr === today ? 'Pending' : 'Synced';
   };
 
-  const groupedTx = txList.reduce((acc, tx) => {
+  const parseDate = (dateStr: string) => {
+    if (!dateStr) return new Date();
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) return d;
+    
+    // Try robust parsing for "Sep 14, 2026"
+    const parts = dateStr.split(' ');
+    if (parts.length >= 3) {
+      const monthStr = parts[0];
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const month = monthNames.indexOf(monthStr);
+      const day = parseInt(parts[1].replace(',', ''), 10);
+      const year = parseInt(parts[2], 10);
+      if (month !== -1 && !isNaN(day) && !isNaN(year)) {
+        return new Date(year, month, day);
+      }
+    }
+    return new Date();
+  };
+
+  const filteredTx = txList.filter(tx => {
+    if (filter === 'All') return true;
+    const txDate = parseDate(tx.date);
+    const today = new Date();
+    if (filter === 'Today') {
+      return txDate.toDateString() === today.toDateString();
+    }
+    if (filter === 'This Week') {
+      const firstDay = new Date(today.setDate(today.getDate() - today.getDay()));
+      return txDate >= firstDay;
+    }
+    if (filter === 'This Month') {
+      const realToday = new Date();
+      return txDate.getMonth() === realToday.getMonth() && txDate.getFullYear() === realToday.getFullYear();
+    }
+    return true;
+  });
+
+  const groupedTx = filteredTx.reduce((acc, tx) => {
     // Basic grouping by Month-Year (e.g. 2026-09 -> September 2026)
-    const dateObj = new Date(tx.date);
+    const dateObj = parseDate(tx.date);
     const monthYear = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     
     if (!acc[monthYear]) {
@@ -50,7 +94,35 @@ export default function TransactionsScreen() {
     if (tx.type === 'expense') acc[monthYear].total -= tx.amount;
     if (tx.type === 'income') acc[monthYear].total += tx.amount;
     return acc;
-  }, {});
+  }, {} as Record<string, any>);
+
+  const handleManageTx = (tx: any) => {
+    Haptics.selectionAsync();
+    Alert.alert(
+      "Manage Transaction",
+      `What would you like to do with this ${currencySymbol}${tx.amount} ${tx.category} transaction?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Edit", 
+          onPress: () => router.push({ pathname: '/add', params: { id: tx.id, type: tx.type } }) 
+        },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              await expoDb.runAsync('DELETE FROM expenses WHERE id = ?', [tx.id]);
+              fetchTransactions();
+            } catch (e) {
+              console.error("Failed to delete", e);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -104,14 +176,14 @@ export default function TransactionsScreen() {
               {group.transactions.map((tx: any) => {
                 const status = getStatus(tx.date);
                 return (
-                  <View key={tx.id} style={styles.txItem}>
+                  <Pressable key={tx.id} style={styles.txItem} onPress={() => handleManageTx(tx)}>
                     <View style={styles.txLeft}>
                       <View style={styles.txIconWrapper}>
-                        <Text style={styles.txIcon}>{tx.category === 'Salary' ? '💰' : tx.category === 'Food' ? '🍱' : tx.category === 'Jeepney' ? '🚌' : '💸'}</Text>
+                        <Text style={styles.txIcon}>{categoryMap[tx.category] || '💸'}</Text>
                       </View>
                       <View style={styles.txDetails}>
                         <Text style={styles.txCategory}>{tx.category}</Text>
-                        <Text style={styles.txDate}>{new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                        <Text style={styles.txDate}>{parseDate(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
                       </View>
                     </View>
                     <View style={styles.txRight}>
@@ -128,7 +200,7 @@ export default function TransactionsScreen() {
                         </View>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>

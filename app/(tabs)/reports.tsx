@@ -9,16 +9,7 @@ import { useThemeStore } from '../../store/theme';
 import { getColors } from '../../theme/colors';
 import { PieChart, LineChart } from 'react-native-gifted-charts';
 
-const CATEGORY_ICONS: Record<string, string> = {
-  Food: '🍱',
-  Transport: '🚌',
-  Shopping: '🛍️',
-  Bills: '🧾',
-  Entertainment: '🎟️',
-  Health: '⚕️',
-  Jeepney: '🚌',
-  Other: '📦'
-};
+import { expoDb } from '../../db';
 
 export default function ReportsScreen() {
   const { theme, currencySymbol } = useThemeStore();
@@ -29,11 +20,17 @@ export default function ReportsScreen() {
   const [totalExpense, setTotalExpense] = useState(0);
   const [savedAmount, setSavedAmount] = useState(0);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
 
   useFocusEffect(
     useCallback(() => {
       const fetchReports = async () => {
         try {
+          const cats: any = await expoDb.getAllAsync('SELECT * FROM categories');
+          const map: Record<string, string> = {};
+          cats.forEach((c: any) => { map[c.name] = c.icon; });
+          setCategoryMap(map);
+
           const allExpenses = await db.select().from(expenses).where(eq(expenses.type, 'expense'));
           
           const currentMonth = selectedDate.getMonth();
@@ -266,7 +263,7 @@ export default function ReportsScreen() {
               return (
                 <View key={item.category} style={styles.categoryProgressRow}>
                   <View style={styles.categoryLabelWrapper}>
-                    <Text style={styles.categoryEmoji}>{CATEGORY_ICONS[item.category] || '📦'}</Text>
+                    <Text style={styles.categoryEmoji}>{categoryMap[item.category] || '📦'}</Text>
                     <Text style={styles.categoryName} numberOfLines={1}>{item.category}</Text>
                   </View>
                   <View style={styles.progressBarTrack}>

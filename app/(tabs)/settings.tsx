@@ -1,17 +1,18 @@
-import { StyleSheet, Text, View, Pressable, Alert, ScrollView, Linking, Platform } from 'react-native';
+import { StyleSheet, Text, View, Pressable, Alert, ScrollView, Linking, Platform, TextInput } from 'react-native';
 import { useState, useCallback } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import { expoDb } from '../../db';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useThemeStore } from '../../store/theme';
 import { getColors } from '../../theme/colors';
 
 export default function SettingsScreen() {
   const [userName, setUserName] = useState("Friend");
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
   
   // Local preferences state
   const [notifications, setNotifications] = useState(true);
@@ -37,8 +38,23 @@ export default function SettingsScreen() {
     }, [])
   );
 
-  const handleEditProfile = () => {
-    Alert.alert("Edit Profile", "Profile editing will be fully supported in the next update. For now, you can reset your data to choose a new name.");
+  const handleEditProfile = async () => {
+    if (isEditingProfile) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      try {
+        const profileCount: any = await expoDb.getFirstAsync('SELECT COUNT(*) as c FROM user_profile');
+        if (profileCount.c === 0) {
+          await expoDb.runAsync('INSERT INTO user_profile (name, has_onboarded) VALUES (?, 1)', [userName]);
+        } else {
+          await expoDb.runAsync('UPDATE user_profile SET name = ?', [userName]);
+        }
+      } catch (e) {
+        console.error("Failed to save profile", e);
+      }
+      setIsEditingProfile(false);
+    } else {
+      setIsEditingProfile(true);
+    }
   };
 
   const handlePassword = () => {
@@ -64,7 +80,8 @@ export default function SettingsScreen() {
       });
 
       const fileName = `PisoTrack_Export_${new Date().getTime()}.csv`;
-      const filePath = FileSystem.cacheDirectory + fileName;
+      const dir = FileSystem.documentDirectory || FileSystem.cacheDirectory || 'file:///';
+      const filePath = `${dir}${dir.endsWith('/') ? '' : '/'}${fileName}`;
       
       await FileSystem.writeAsStringAsync(filePath, csvContent, { encoding: FileSystem.EncodingType.UTF8 });
       
@@ -160,11 +177,20 @@ export default function SettingsScreen() {
           <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
         </LinearGradient>
         <View style={styles.profileInfo}>
-          <Text style={styles.profileName}>{userName}</Text>
+          {isEditingProfile ? (
+            <TextInput
+              style={[styles.profileName, { borderBottomWidth: 1, borderBottomColor: colors.border, padding: 0 }]}
+              value={userName}
+              onChangeText={setUserName}
+              autoFocus
+            />
+          ) : (
+            <Text style={styles.profileName}>{userName}</Text>
+          )}
           <Text style={styles.profileEmail}>offline_user@local</Text>
         </View>
         <Pressable style={styles.editBtn} onPress={handleEditProfile}>
-          <Text style={styles.editBtnText}>Edit</Text>
+          <Text style={styles.editBtnText}>{isEditingProfile ? 'Save' : 'Edit'}</Text>
         </Pressable>
       </View>
 
@@ -174,6 +200,13 @@ export default function SettingsScreen() {
         <Pressable style={styles.listItem} onPress={handleEditProfile}>
           <Ionicons name="person-outline" size={20} color={colors.textSecondary} style={styles.listIcon} />
           <Text style={styles.listTitle}>Profile</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.borderLight} />
+        </Pressable>
+        <View style={styles.divider} />
+        
+        <Pressable style={styles.listItem} onPress={() => router.push('/manage-categories')}>
+          <Ionicons name="list-outline" size={20} color={colors.textSecondary} style={styles.listIcon} />
+          <Text style={styles.listTitle}>Manage Categories</Text>
           <Ionicons name="chevron-forward" size={16} color={colors.borderLight} />
         </Pressable>
         <View style={styles.divider} />

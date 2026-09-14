@@ -17,6 +17,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  // @ts-ignore: recharts is a web library not installed in this mobile project
 } from "recharts";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
@@ -1172,7 +1173,7 @@ function AppReports() {
               contentStyle={{ background: C.n800, border: `1px solid ${C.n700}`, borderRadius: 10, fontFamily: S.inter, fontSize: 12 }}
               itemStyle={{ color: C.primary400 }}
               labelStyle={{ color: C.white }}
-              formatter={(v) => [`₱${v}`, "Spent"]}
+              formatter={(v: any) => [`₱${v}`, "Spent"]}
             />
             <Line type="monotone" dataKey="amount" stroke={C.primary400} strokeWidth={2.5} dot={{ fill: C.primary400, r: 4, strokeWidth: 0 }} />
           </LineChart>
